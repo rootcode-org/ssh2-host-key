@@ -14,9 +14,17 @@ class Stream:
     BIG_ENDIAN = 1
 
     def __init__(self, endian=None):
+        self.position = 0
         self.length = 0
         self.endian = endian if endian else self.LITTLE_ENDIAN
         self.endian_stack = []
+        self.position_stack = []
+
+    def reset(self):
+        self.position = 0
+        self.length = 0
+        self.endian_stack = []
+        self.position_stack = []
 
     def get_length(self):
         return self.length
@@ -34,6 +42,34 @@ class Stream:
 
     def pop_endian(self):
         self.endian = self.endian_stack.pop()
+
+    def set_position(self, offset, whence=io.SEEK_SET):
+        if whence == io.SEEK_SET:
+            new_position = offset
+        elif whence == io.SEEK_CUR:
+            new_position = self.position + offset
+        elif whence == io.SEEK_END:
+            new_position = self.length + offset
+        else:
+            raise ValueError("Invalid position basis")
+        if new_position < 0 or new_position > self.length:
+            raise ValueError("Position out of range")
+        self.position = new_position
+
+    def get_position(self):
+        return self.position
+
+    def push_position(self, new_position):
+        current_position = self.position
+        self.position_stack.append(current_position)
+        self.position = new_position
+        return current_position
+
+    def pop_position(self):
+        self.position = self.position_stack.pop()
+
+    def is_eof(self):
+        return self.position == self.length
 
     def write_u8(self, value):
         raise ("Virtual function")
@@ -100,8 +136,7 @@ class Stream:
             value >>= 7
         self.write_u8(value)
 
-    # variable length signed quantity
-    # same as VLUQ but the sign is stored in the low bit
+    # variable length signed quantity; same as VLUQ but the sign is stored in the low bit
     def write_vlsq(self, value):
         sign = 1 if value < 0 else 0
         value = (abs(value) << 1) + sign
@@ -179,8 +214,6 @@ class Stream:
         else:
             return struct.unpack('>d', data)[0]
 
-    # variable length unsigned quantity
-    # value is stored 7 bits at a time in little-endian order; last value has MSB of 0
     def read_vluq(self):
         accumulator = shift = 0
         value = self.read_u8()
@@ -190,8 +223,6 @@ class Stream:
             value = self.read_u8()
         return accumulator + (value << shift)
 
-    # variable length signed quantity
-    # same as VLUQ but the sign is stored in the low bit
     def read_vlsq(self):
         value = self.read_vluq()
         sign = value & 1
@@ -247,73 +278,42 @@ class Stream:
 
 class ByteStream(Stream):
 
-    SEEK_SET = 0
-    SEEK_CUR = 1
-    SEEK_END = 2
-
     def __init__(self, endian=None):
         Stream.__init__(self, endian)
         self.data = bytearray()
-        self.read_position = 0        # position is used for read operations only
-        self.read_position_stack = []
 
     def reset(self):
+        Stream.reset(self)
         self.data = bytearray()
-        self.length = 0
-        self.read_position = 0
-        self.read_position_stack = []
 
     def set_data(self, data, length=None):
+        self.position = 0
         self.data = bytearray(data)
-        if length:
-            self.length = length
-        else:
-            self.length = len(self.data)
-        self.read_position = 0
+        self.length = length if length else len(self.data)
 
     def get_data(self):
         return self.data
 
-    # position is for read operations only; write operations append to the bytearray
-    def set_read_position(self, offset, whence=SEEK_SET):
-        if whence == ByteStream.SEEK_SET:
-            self.read_position = offset                 # offset must be zero or positive
-        elif whence == ByteStream.SEEK_CUR:
-            self.read_position += offset                # offset can be positive or negative
-        else:
-            self.read_position = self.length + offset   # offset must be negative
-
-    def get_read_position(self):
-        return self.read_position
-
-    def push_read_position(self, new_position):
-        current_position = self.get_read_position()
-        self.read_position_stack.append(current_position)
-        self.set_read_position(new_position)
-        return current_position
-
-    def pop_read_position(self):
-        self.set_read_position(self.read_position_stack.pop())
-
-    def is_eof(self):
-        return self.read_position == self.length
-
     def write_u8(self, value):
+        # For now, ignores position and always writes to end of byte array
         self.data.append(value)
         self.length += 1
+        self.position += 1
 
     def write_u8_array(self, data):
+        # For now, ignores position and always writes to end of byte array
         self.data += data
         self.length += len(data)
+        self.position += len(data)
 
     def read_u8(self):
-        value = self.data[self.read_position]
-        self.read_position += 1
+        value = self.data[self.position]
+        self.position += 1
         return value
 
     def read_u8_array(self, length):
-        value = self.data[self.read_position:self.read_position + length]
-        self.read_position += length
+        value = self.data[self.position:self.position + length]
+        self.position += length
         return value
 
 
@@ -323,25 +323,17 @@ class FileStream(Stream):
         Stream.__init__(self, endian)
         self.handle = io.open(file_name, mode)
         self.length = os.path.getsize(file_name)
-        self.position_stack = []
 
     def close(self):
         self.handle.close()
 
-    def set_position(self, position, whence=io.SEEK_SET):
-        self.handle.seek(position, whence)
+    def set_position(self, offset, whence=io.SEEK_SET):
+        Stream.set_position(self, offset, whence)
+        self.handle.seek(offset, whence)
 
     def get_position(self):
-        return self.handle.tell()
-
-    def push_position(self, new_position):
-        current_position = self.get_position()
-        self.position_stack.append(current_position)
-        self.set_position(new_position)
-        return current_position
-
-    def pop_position(self):
-        self.set_position(self.position_stack.pop())
+        self.position = self.handle.tell()
+        return self.position
 
     def get_remaining(self):
         return self.length - self.handle.tell()
@@ -350,12 +342,14 @@ class FileStream(Stream):
         return self.handle.tell() == self.length
 
     def write_u8(self, value):
-        self.handle.write(bytes([value]))
+        self.handle.write(value)
         self.length += 1
+        self.position += 1
 
     def write_u8_array(self, data):
         self.handle.write(data)
         self.length += len(data)
+        self.position += len(data)
 
     def read_u8(self):
         return ord(self.handle.read(1))
@@ -375,25 +369,24 @@ class SocketStream(Stream):
         self.write_buffer = bytearray()
         self.read_buffer = bytearray()
         self.read_buffer_length = 0
-        self.read_position = 0
 
     def close(self):
         self.socket.close()
 
-    def read_seek(self, offset):
-        if offset < 0:
-            raise ValueError("Backwards seek is not supported")
-        self.read_position += offset
+    def set_position(self, offset, whence=io.SEEK_CUR):
+        if whence != io.SEEK_CUR or offset < 0:
+            raise ValueError("Seek type not supported")
+        self.position += offset
 
     def read_u8(self):
         return self.read_u8_array(1)[0]
 
     def read_u8_array(self, length, read_ahead=16384):
-        if self.read_position + length > len(self.read_buffer):
-            self.read_buffer = self.read_buffer[self.read_position:] + self.socket.recv(length + read_ahead)
-            self.read_position = 0
-        data = self.read_buffer[self.read_position:self.read_position + length]
-        self.read_position += length
+        if self.position + length > len(self.read_buffer):
+            self.read_buffer = self.read_buffer[self.position:] + self.socket.recv(length + read_ahead)
+            self.position = 0
+        data = self.read_buffer[self.position:self.position + length]
+        self.position += length
         return data
 
     def write_u8(self, value):

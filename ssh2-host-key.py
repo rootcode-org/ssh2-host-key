@@ -1,5 +1,6 @@
 # Copyright is waived. No warranty is provided. Unrestricted use and modification is permitted.
 
+import io
 import os
 import sys
 import re
@@ -36,15 +37,14 @@ COMPRESSION_ALGORITHMS_SERVER_TO_CLIENT = ["none"]
 class SSH_Message:
     def __init__(self):
         self.payload = None
-        self.message = ByteStream()
-        self.message.set_endian(ByteStream.BIG_ENDIAN)
+        self.message = ByteStream(ByteStream.BIG_ENDIAN)
 
     def read(self, stream):
         packet_length = stream.read_u32()
         padding_length = stream.read_u8()
         payload_length = packet_length - padding_length - 1
         self.payload = stream.read_u8_array(payload_length)
-        stream.read_seek(padding_length)
+        stream.set_position(padding_length, io.SEEK_CUR)
         self.message.set_data(self.payload)
 
     def write(self, stream):

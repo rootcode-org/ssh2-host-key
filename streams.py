@@ -374,17 +374,24 @@ class SocketStream(Stream):
         self.socket.close()
 
     def set_position(self, offset, whence=io.SEEK_CUR):
-        if whence != io.SEEK_CUR or offset < 0:
-            raise ValueError("Seek type not supported")
-        self.position += offset
+        if whence == io.SEEK_SET:
+            new_position = offset
+        elif whence == io.SEEK_CUR:
+            new_position = self.position + offset
+        else:
+            raise ValueError("Invalid position basis")
+        if new_position < 0:
+            raise ValueError("Position out of range")
+        self.position = new_position
 
     def read_u8(self):
         return self.read_u8_array(1)[0]
 
-    def read_u8_array(self, length, read_ahead=16384):
-        if self.position + length > len(self.read_buffer):
-            self.read_buffer = self.read_buffer[self.position:] + self.socket.recv(length + read_ahead)
-            self.position = 0
+    def read_u8_array(self, length):
+        # Read data from socket; wait until enough data is available to satisfy request
+        while self.position + length > len(self.read_buffer):
+            bytes_needed = self.position + length - len(self.read_buffer)
+            self.read_buffer += self.socket.recv(bytes_needed)
         data = self.read_buffer[self.position:self.position + length]
         self.position += length
         return data

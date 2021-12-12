@@ -72,10 +72,10 @@ class Stream:
         return self.position == self.length
 
     def write_u8(self, value):
-        raise ("Virtual function")
+        raise "Virtual function"
 
     def write_u8_array(self, data):
-        raise ("Virtual function")
+        raise "Virtual function"
 
     def write_bool(self, value):
         self.write_u8(1 if value else 0)
@@ -163,10 +163,10 @@ class Stream:
         self.write_string(string)
 
     def read_u8(self):
-        raise ("Virtual function")
+        raise "Virtual function"
 
     def read_u8_array(self, length):
-        raise ("Virtual function")
+        raise "Virtual function"
 
     def read_bool(self):
         value = self.read_u8()
